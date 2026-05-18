@@ -31,10 +31,18 @@ require curl
 ACTION="${1:-install}"
 
 backup_settings() {
-  [[ -f "$SETTINGS" ]] || { echo '{}' > "$SETTINGS"; return; }
-  local bk="${SETTINGS}.claude-export.bak.$(date +%s)"
-  cp "$SETTINGS" "$bk"
-  info "Settings backup: $bk"
+  if [[ -f "$SETTINGS" ]]; then
+    local bk="${SETTINGS}.claude-export.bak.$(date +%s)"
+    cp "$SETTINGS" "$bk"
+    info "Settings backup: $bk"
+    # 기존 파일이 invalid JSON 이면 jq 가 뒤에서 실패하므로 미리 감지해서 명확히 안내
+    if ! jq -e . "$SETTINGS" >/dev/null 2>&1; then
+      red "Existing $SETTINGS is not valid JSON. Original is backed up at $bk. Aborting."
+      exit 1
+    fi
+  else
+    echo '{}' > "$SETTINGS"
+  fi
 }
 
 add_hook_entry() {

@@ -28,6 +28,46 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Claude Code 의 projects/ 디렉터리 인코딩과 동일 규칙:
+# 영숫자가 아닌 모든 문자(/, ., 공백, _ 등)를 '-' 로 치환.
+# 예: /Users/joo/Documents/GitHub/Raon-OpenTTS-0.3B
+#  -> -Users-joo-Documents-GitHub-Raon-OpenTTS-0-3B
+encode_cwd() {
+  local s="$1"
+  # bash 의 변수 확장만으로는 character class 치환이 안 되므로 sed 사용
+  printf '%s' "$s" | LC_ALL=C sed 's/[^A-Za-z0-9]/-/g'
+}
+
+# 후보 transcript 들 중 내부 cwd 가 정확히 일치하는 것만 선택 (인코딩 충돌 회피).
+# 일치하는 것이 여러 개면 mtime 이 가장 최근인 것.
+find_transcript_for_cwd() {
+  local target_cwd="$1"
+  local encoded
+  encoded=$(encode_cwd "$target_cwd")
+  local proj_dir="${HOME}/.claude/projects/${encoded}"
+  [[ -d "$proj_dir" ]] || return 1
+
+  local best=""
+  local best_mtime=0
+  local f mtime real_cwd
+  # null-byte 구분으로 안전하게 순회
+  while IFS= read -r -d '' f; do
+    # 각 .jsonl 의 첫 cwd 필드를 읽어 실제 프로젝트 경로 확인
+    real_cwd=$(jq -r 'select(.cwd != null) | .cwd' "$f" 2>/dev/null | head -n 1 || true)
+    # cwd 필드가 없는 오래된 transcript 는 인코딩만 일치하면 일단 후보로 둠
+    if [[ -z "$real_cwd" || "$real_cwd" == "$target_cwd" ]]; then
+      mtime=$(stat -f '%m' "$f" 2>/dev/null || stat -c '%Y' "$f" 2>/dev/null || echo 0)
+      if (( mtime > best_mtime )); then
+        best_mtime=$mtime
+        best="$f"
+      fi
+    fi
+  done < <(find "$proj_dir" -maxdepth 1 -type f -name '*.jsonl' -print0 2>/dev/null)
+
+  [[ -n "$best" ]] || return 1
+  printf '%s\n' "$best"
+}
+
 if [[ "$SOURCE" == "slash" ]]; then
   # 슬래시 커맨드 컨텍스트: stdin JSON이 없음. cwd로부터 transcript를 추론.
   cwd="$SLASH_CWD"
@@ -35,14 +75,12 @@ if [[ "$SOURCE" == "slash" ]]; then
     echo "export-response: --cwd is required and must exist" >&2
     exit 1
   fi
-  # cwd의 /를 -로 치환한 디렉터리 아래의 가장 최근 .jsonl
-  encoded="${cwd//\//-}"
-  proj_dir="${HOME}/.claude/projects/${encoded}"
-  if [[ ! -d "$proj_dir" ]]; then
-    echo "No completed response found to export."
-    exit 0
+  # newline 등 비정상 문자가 들어 있으면 거부 (방어적)
+  if [[ "$cwd" == *$'\n'* ]]; then
+    echo "export-response: cwd contains newline; refusing" >&2
+    exit 1
   fi
-  transcript=$(ls -t "$proj_dir"/*.jsonl 2>/dev/null | head -n 1 || true)
+  transcript=$(find_transcript_for_cwd "$cwd" || true)
   if [[ -z "$transcript" || ! -f "$transcript" ]]; then
     echo "No completed response found to export."
     exit 0
@@ -74,12 +112,10 @@ fi
 # "진짜 user prompt" 는 content가 문자열이거나 tool_result가 아닌 user 라인.
 # 그 마지막 진짜 user prompt 이후의 모든 assistant.text 블록을 시간순으로 잇는다.
 #
-# 슬래시 커맨드 컨텍스트에서는 transcript 끝에 "/export-response" user 라인이
-# 이미 추가된 상태이므로, 그 라인 자체는 건너뛰고 그 *직전* 실제 user prompt
-# 이후의 assistant.text 를 추출해야 한다.
 # 슬래시 컨텍스트에서는 transcript 끝에 "/export-response" user 라인이
 # 이미 추가된 상태이므로, 그 라인 자체는 건너뛰고 그 *직전* 실제 user prompt
 # 이후의 assistant.text 를 추출하기 위해 skip_last=1 을 넘긴다.
+# 단, user prompt 가 단 1개뿐인 세션이면 fallback 으로 그 1개부터 추출.
 skip_last=0
 [[ "$SOURCE" == "slash" ]] && skip_last=1
 
@@ -89,11 +125,9 @@ content=$(jq -rs --argjson skip_last "$skip_last" '
     and ((.message.content | type == "string")
          or (.message.content | type == "array"
              and any(.[]; .type != "tool_result")));
-  # 실제 user prompt 인덱스를 시간순으로 모음
   [range(0; length) as $i | select(.[$i] | is_real_user) | $i] as $user_idxs
   | (if ($user_idxs | length) == 0 then null
      elif $skip_last == 1 and ($user_idxs | length) >= 2 then $user_idxs[-2]
-     elif $skip_last == 1 then null
      else $user_idxs[-1] end) as $start
   | if $start == null then []
     else .[$start:]
@@ -123,18 +157,14 @@ out="$out_dir/${session_id}.md"
 
 # 새 파일이면 H1 헤더로 시작
 if [[ ! -e "$out" ]]; then
-  {
-    printf '# Claude session %s\n\n' "$session_id"
-    printf -- '---\n\n'
-  } > "$out"
+  printf '# Claude session %s\n\n---\n\n' "$session_id" > "$out"
 fi
 
-# 응답 1건 append: H2 timestamp + 본문 + 구분선
-{
-  printf '## %s\n\n' "$ts"
-  printf '%s\n\n' "$content"
-  printf -- '---\n\n'
-} >> "$out"
+# 응답 1건을 한 번의 write 로 append (동시 Stop hook 간 인터리브 방지).
+# 페이로드 전체를 변수에 만든 뒤 단일 printf 호출로 append 하면
+# 짧은 경우엔 사실상 atomic 하다 (PIPE_BUF 이하).
+payload="$(printf '## %s\n\n%s\n\n---\n\n' "$ts" "$content")"
+printf '%s' "$payload" >> "$out"
 
 if [[ "$SOURCE" == "slash" ]]; then
   echo "Exported last response → $out"
