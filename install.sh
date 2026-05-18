@@ -11,6 +11,8 @@ REPO_RAW="https://raw.githubusercontent.com/Hyunsang-coder/claude-export/main"
 CLAUDE_DIR="${HOME}/.claude"
 HOOK_DST="${CLAUDE_DIR}/hooks/export-last-response.sh"
 CMD_DST="${CLAUDE_DIR}/commands/export.md"
+CMD_RESP_DST="${CLAUDE_DIR}/commands/export-response.md"
+CMD_UPDATE_DST="${CLAUDE_DIR}/commands/update-claude-export.md"
 SETTINGS="${CLAUDE_DIR}/settings.json"
 HOOK_MARK="claude-export:v1"
 
@@ -81,6 +83,12 @@ do_install() {
   fetch "${REPO_RAW}/commands/export.md" "$CMD_DST"
   info "Installed: $CMD_DST"
 
+  fetch "${REPO_RAW}/commands/export-response.md" "$CMD_RESP_DST"
+  info "Installed: $CMD_RESP_DST"
+
+  fetch "${REPO_RAW}/commands/update-claude-export.md" "$CMD_UPDATE_DST"
+  info "Installed: $CMD_UPDATE_DST"
+
   backup_settings
   add_hook_entry
   info "Registered Stop hook in $SETTINGS"
@@ -111,8 +119,10 @@ do_uninstall() {
   remove_hook_entry
   info "Removed Stop hook entry from $SETTINGS"
 
-  [[ -f "$HOOK_DST" ]] && { rm -f "$HOOK_DST"; info "Deleted: $HOOK_DST"; } || true
-  [[ -f "$CMD_DST" ]]  && { rm -f "$CMD_DST";  info "Deleted: $CMD_DST"; }  || true
+  [[ -f "$HOOK_DST" ]]       && { rm -f "$HOOK_DST";       info "Deleted: $HOOK_DST"; }       || true
+  [[ -f "$CMD_DST" ]]        && { rm -f "$CMD_DST";        info "Deleted: $CMD_DST"; }        || true
+  [[ -f "$CMD_RESP_DST" ]]   && { rm -f "$CMD_RESP_DST";   info "Deleted: $CMD_RESP_DST"; }   || true
+  [[ -f "$CMD_UPDATE_DST" ]] && { rm -f "$CMD_UPDATE_DST"; info "Deleted: $CMD_UPDATE_DST"; } || true
 
   green "Done. Per-project flags (.claude/export-enabled) and exported files (claude-exports/) are left alone."
 }

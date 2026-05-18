@@ -23,6 +23,8 @@ curl -fsSL https://raw.githubusercontent.com/Hyunsang-coder/claude-export/main/i
 | `/export on` | **현재 프로젝트**에서 자동 export 활성화. `./.claude/export-enabled` 생성. |
 | `/export off` | 현재 프로젝트에서 비활성화. |
 | `/export status` | ON/OFF 상태 표시. |
+| `/export-response` | export off 상태에서도 **마지막 완료된 응답 1건만** 즉시 저장. 같은 세션이면 기존 파일에 append, 처음이면 새로 생성. |
+| `/update-claude-export` | 최신 버전으로 업데이트 (install.sh 재실행). 변경 사항을 적용하려면 Claude Code 재시작 필요. |
 
 출력은 `./claude-exports/{session_id}.md`에 저장되며 다음과 같은 형식입니다:
 
@@ -69,6 +71,8 @@ Claude가 한 턴을 마치면 `Stop` 훅이 실행됩니다. 번들된 `hooks/e
 
 - `~/.claude/hooks/export-last-response.sh` — 훅 스크립트
 - `~/.claude/commands/export.md` — `/export` 슬래시 커맨드
+- `~/.claude/commands/export-response.md` — `/export-response` 슬래시 커맨드
+- `~/.claude/commands/update-claude-export.md` — `/update-claude-export` 슬래시 커맨드
 - `~/.claude/settings.json`의 `hooks.Stop`에 항목 1개 추가 (`claude-export:v1` 태그가 붙어 있어 uninstall 시 깔끔하게 제거 가능). 기존 설정과 다른 훅들은 보존되며, 타임스탬프가 붙은 백업이 같은 위치에 생성됩니다.
 
 ## 제거
