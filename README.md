@@ -1,30 +1,30 @@
 # claude-export
 
-Auto-save every Claude Code response to a per-session markdown file in your project. **Zero LLM calls** — pure `bash` + `jq`.
+Claude Code의 모든 응답을 프로젝트별 마크다운 파일로 자동 저장합니다. **LLM 호출 없음** — 순수 `bash` + `jq`.
 
-One session = one markdown file. Each response is appended as a timestamped section.
+세션 하나 = 마크다운 파일 하나. 각 응답이 타임스탬프가 붙은 섹션으로 누적됩니다.
 
-## Install
+## 설치
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Hyunsang-coder/claude-export/main/install.sh | bash
 ```
 
-That's it. Then, in any project you want to export:
+끝입니다. 그런 다음 export를 켜고 싶은 프로젝트에서 다음을 실행하세요:
 
 ```
 /export on
 ```
 
-## Usage
+## 사용법
 
-| Command | Effect |
+| 명령어 | 동작 |
 |---|---|
-| `/export on` | Enable auto-export **for the current project**. Creates `./.claude/export-enabled`. |
-| `/export off` | Disable for the current project. |
-| `/export status` | Show ON/OFF. |
+| `/export on` | **현재 프로젝트**에서 자동 export 활성화. `./.claude/export-enabled` 생성. |
+| `/export off` | 현재 프로젝트에서 비활성화. |
+| `/export status` | ON/OFF 상태 표시. |
 
-Output lives at `./claude-exports/{session_id}.md`, looking like:
+출력은 `./claude-exports/{session_id}.md`에 저장되며 다음과 같은 형식입니다:
 
 ```markdown
 # Claude session 1fa310da-5bd5-4f34-8d8c-bb9c9400d3e5
@@ -33,7 +33,7 @@ Output lives at `./claude-exports/{session_id}.md`, looking like:
 
 ## 2026-05-18 10:34:00
 
-(assistant response text — tool calls and tool results are excluded)
+(assistant 응답 텍스트 — tool call과 tool result는 제외됨)
 
 ---
 
@@ -42,43 +42,43 @@ Output lives at `./claude-exports/{session_id}.md`, looking like:
 ...
 ```
 
-## Suggested `.gitignore`
+## `.gitignore` 권장 설정
 
 ```
 .claude/export-enabled
 claude-exports/
 ```
 
-## Requirements
+## 요구사항
 
-- macOS or Linux (Windows untested)
+- macOS 또는 Linux (Windows는 테스트되지 않음)
 - `bash`, `jq`, `curl`
 
-Install `jq` via `brew install jq` (macOS) or `apt install jq` (Debian/Ubuntu).
+`jq` 설치: `brew install jq` (macOS) 또는 `apt install jq` (Debian/Ubuntu).
 
-## How it works
+## 동작 원리
 
-A `Stop` hook fires when Claude finishes a turn. The bundled `hooks/export-last-response.sh`:
+Claude가 한 턴을 마치면 `Stop` 훅이 실행됩니다. 번들된 `hooks/export-last-response.sh`는 다음을 수행합니다:
 
-1. Reads `transcript_path`, `cwd`, `session_id` from the hook's stdin JSON.
-2. If `$cwd/.claude/export-enabled` doesn't exist → exit silently.
-3. Otherwise runs `jq` over the JSONL transcript to extract every `assistant.text` block that came after the last *real* user prompt (skipping `tool_result` lines).
-4. Appends to `$cwd/claude-exports/{session_id}.md` with a timestamp header.
+1. 훅의 stdin JSON에서 `transcript_path`, `cwd`, `session_id`를 읽음.
+2. `$cwd/.claude/export-enabled`가 없으면 → 조용히 종료.
+3. 있으면 JSONL transcript에 `jq`를 실행해 마지막 *실제* 사용자 프롬프트 이후의 모든 `assistant.text` 블록을 추출 (`tool_result` 라인은 건너뜀).
+4. 타임스탬프 헤더와 함께 `$cwd/claude-exports/{session_id}.md`에 append.
 
-## What gets installed
+## 설치되는 항목
 
-- `~/.claude/hooks/export-last-response.sh` — the hook script
-- `~/.claude/commands/export.md` — the `/export` slash command
-- One entry added to `~/.claude/settings.json` under `hooks.Stop` (tagged `claude-export:v1` so uninstall can remove it cleanly). Your existing settings and other hooks are preserved; a timestamped backup is written next to the file.
+- `~/.claude/hooks/export-last-response.sh` — 훅 스크립트
+- `~/.claude/commands/export.md` — `/export` 슬래시 커맨드
+- `~/.claude/settings.json`의 `hooks.Stop`에 항목 1개 추가 (`claude-export:v1` 태그가 붙어 있어 uninstall 시 깔끔하게 제거 가능). 기존 설정과 다른 훅들은 보존되며, 타임스탬프가 붙은 백업이 같은 위치에 생성됩니다.
 
-## Uninstall
+## 제거
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Hyunsang-coder/claude-export/main/install.sh | bash -s -- uninstall
 ```
 
-Removes the three things above. Per-project flags (`.claude/export-enabled`) and already-exported files are left alone.
+위 세 항목을 제거합니다. 프로젝트별 플래그(`.claude/export-enabled`)와 이미 export된 파일은 그대로 남겨둡니다.
 
-## License
+## 라이선스
 
 MIT
