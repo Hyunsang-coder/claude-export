@@ -24,9 +24,12 @@ curl -fsSL https://raw.githubusercontent.com/Hyunsang-coder/claude-export/main/i
 | `/export off` | 현재 프로젝트에서 비활성화. |
 | `/export status` | ON/OFF 상태 표시. |
 | `/export-response` | export off 상태에서도 **마지막 완료된 응답 1건만** 즉시 저장. 같은 세션이면 기존 파일에 append, 처음이면 새로 생성. |
+| `/export-all-responses` | 현재 세션의 **모든 assistant 응답**을 한 번에 dump. 같은 세션 파일을 **덮어씁니다** (append 아님). |
 | `/update-claude-export` | 최신 버전으로 업데이트 (install.sh 재실행). 변경 사항을 적용하려면 Claude Code 재시작 필요. |
 
-출력은 `./claude-exports/{session_id}.md`에 저장되며 다음과 같은 형식입니다:
+출력 파일은 `./claude-exports/YYYY-MM-DD_HH-MM_<sessionid12>.md` 형식으로 저장됩니다 (예: `2026-05-18_15-43_2b5f99a4-d63.md`). 같은 세션의 후속 응답은 첫 export 시각이 박힌 그 파일에 계속 append됩니다.
+
+`/export on` 또는 `/export-response` 로 누적되는 파일은 응답마다 타임스탬프 헤더가 붙는 형식:
 
 ```markdown
 # Claude session 1fa310da-5bd5-4f34-8d8c-bb9c9400d3e5
@@ -42,6 +45,20 @@ curl -fsSL https://raw.githubusercontent.com/Hyunsang-coder/claude-export/main/i
 ## 2026-05-18 10:37:46
 
 ...
+```
+
+`/export-all-responses` 는 파일을 **덮어쓰며**, 단일 dump 헤더와 함께 그 시점까지의 모든 assistant text 를 한 블록으로 출력합니다:
+
+```markdown
+# Claude session 1fa310da-5bd5-4f34-8d8c-bb9c9400d3e5
+
+_Full transcript dump @ 2026-05-18 16:22:01_
+
+---
+
+(세션 전체 assistant 응답, 시간순)
+
+---
 ```
 
 ## `.gitignore` 권장 설정
@@ -72,6 +89,7 @@ Claude가 한 턴을 마치면 `Stop` 훅이 실행됩니다. 번들된 `hooks/e
 - `~/.claude/hooks/export-last-response.sh` — 훅 스크립트
 - `~/.claude/commands/export.md` — `/export` 슬래시 커맨드
 - `~/.claude/commands/export-response.md` — `/export-response` 슬래시 커맨드
+- `~/.claude/commands/export-all-responses.md` — `/export-all-responses` 슬래시 커맨드
 - `~/.claude/commands/update-claude-export.md` — `/update-claude-export` 슬래시 커맨드
 - `~/.claude/settings.json`의 `hooks.Stop`에 항목 1개 추가 (`claude-export:v1` 태그가 붙어 있어 uninstall 시 깔끔하게 제거 가능). 기존 설정과 다른 훅들은 보존되며, 타임스탬프가 붙은 백업이 같은 위치에 생성됩니다.
 

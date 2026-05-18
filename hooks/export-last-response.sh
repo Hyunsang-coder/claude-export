@@ -17,6 +17,7 @@ set -euo pipefail
 MODE="${1:-auto}"
 SOURCE="hook"
 SLASH_CWD=""
+SCOPE="last"   # last | all
 
 # 두 번째 이후 인자 파싱 (슬래시 커맨드 경로)
 shift || true
@@ -24,6 +25,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --slash) SOURCE="slash"; shift ;;
     --cwd)   SLASH_CWD="${2:-}"; shift 2 ;;
+    --all)   SCOPE="all"; shift ;;
     *) shift ;;
   esac
 done
@@ -122,7 +124,7 @@ fi
 mode_arg="hook"
 [[ "$SOURCE" == "slash" ]] && mode_arg="slash"
 
-content=$(jq -rs --arg mode "$mode_arg" '
+content=$(jq -rs --arg mode "$mode_arg" --arg scope "$SCOPE" '
   def is_real_user:
     .type=="user"
     and ((.message.content | type == "string")
@@ -137,7 +139,7 @@ content=$(jq -rs --arg mode "$mode_arg" '
       else "" end;
   # 이 user 라인이 슬래시 트리거의 일부인지 판정.
   # - <command-name>/...</command-name> 메타데이터, 또는
-  # - export-response.md 본문(특징적인 첫 줄: "Run the export hook once")
+  # - export-response.md / export-all-responses.md 본문(특징적인 첫 줄)
   def is_slash_trigger_line:
     is_real_user
     and (user_text as $t
@@ -146,24 +148,50 @@ content=$(jq -rs --arg mode "$mode_arg" '
 
   . as $all
   | [range(0; length) as $i | select($all[$i] | is_real_user) | $i] as $user_idxs
-  | (if $mode == "slash" then
-       # 슬래시 트리거가 아닌 user 라인 인덱스만 추림 → 그 마지막이 진짜 prompt.
-       ([$user_idxs[] | select(($all[.] | is_slash_trigger_line) | not)]) as $non_trigger
-       | if ($non_trigger | length) > 0 then $non_trigger[-1]
-         elif ($user_idxs | length) > 0 then $user_idxs[-1]
-         else null end
-     elif ($user_idxs | length) > 0 then $user_idxs[-1]
-     else null end) as $start
-  | if $start == null then []
-    else .[$start:]
-         | map(select(.type=="assistant"))
-         | map(.message.content[]? | select(.type=="text") | .text)
+  | if $scope == "all" then
+      # 세션 전체 dump. 슬래시 트리거 user 라인과 그에 *대한* assistant 응답
+      # ("Exported full session →...", "Exported last response →..." 등) 모두 제외.
+      # 각 assistant 라인 i 에 대해, 그 직전의 is_real_user 라인이 슬래시 트리거이면 skip.
+      [range(0; length) as $i
+       | select($all[$i].type == "assistant")
+       | ([$user_idxs[] | select(. < $i)] | last) as $prev_user
+       | select($prev_user == null or ($all[$prev_user] | is_slash_trigger_line | not))
+       | $all[$i]
+      ]
+      | map(.message.content[]? | select(.type=="text") | .text)
+      | join("\n\n")
+    else
+      # last 모드: 직전 user prompt 이후의 assistant.text 만.
+      (if $mode == "slash" then
+         ([$user_idxs[] | select(($all[.] | is_slash_trigger_line) | not)]) as $non_trigger
+         | if ($non_trigger | length) > 0 then $non_trigger[-1]
+           elif ($user_idxs | length) > 0 then $user_idxs[-1]
+           else null end
+       elif ($user_idxs | length) > 0 then $user_idxs[-1]
+       else null end) as $start
+      | if $start == null then ""
+        else (.[$start:] | map(select(.type=="assistant"))) as $assts
+             | if ($assts | length) == 0 then ""
+               else
+                 # 마지막 assistant 라인의 stop_reason 이 end_turn / stop_sequence 가 아니면
+                 # 아직 턴이 끝나지 않은 중간 상태 → 빈 결과 (저장 스킵).
+                 # 슬래시 모드는 사용자가 명시적으로 호출했으므로 가드 미적용.
+                 ($assts | last | .message.stop_reason // "") as $last_reason
+                 | if $mode != "slash"
+                      and ($last_reason != "end_turn")
+                      and ($last_reason != "stop_sequence")
+                   then ""
+                   else $assts
+                        | map(.message.content[]? | select(.type=="text") | .text)
+                        | join("\n\n")
+                   end
+               end
+        end
     end
-  | join("\n\n")
 ' "$transcript" 2>/dev/null || true)
 
-# 추출 결과가 비어있으면 저장하지 않음
-if [[ -z "${content// }" ]]; then
+# 추출 결과가 비어있으면 저장하지 않음 (모든 whitespace 제거 후 비교)
+if [[ -z "${content//[[:space:]]/}" ]]; then
   if [[ "$SOURCE" == "slash" ]]; then
     echo "No completed response found to export."
   fi
@@ -178,21 +206,51 @@ mkdir -p "$out_dir"
 if [[ -z "$session_id" ]]; then
   session_id="nosession-$(date +%Y-%m-%d)"
 fi
-out="$out_dir/${session_id}.md"
 
-# 새 파일이면 H1 헤더로 시작
-if [[ ! -e "$out" ]]; then
-  printf '# Claude session %s\n\n---\n\n' "$session_id" > "$out"
+# 파일명: YYYY-MM-DD_HH-MM_<sessionid12>.md
+# 같은 세션의 후속 export 는 기존 파일을 그대로 사용해야 하므로
+# *_<sessionid12>.md 패턴으로 먼저 검색. 없을 때만 현재 시각으로 새로 만듦.
+# 12자 prefix 면 UUID 충돌 확률은 무시 가능. 그래도 다중 매칭이 생기면
+# 가장 오래된(=세션 첫 export) 파일을 선택해 결정론적으로 동작.
+sid12="${session_id:0:12}"
+out=""
+oldest_mtime=0
+while IFS= read -r -d '' f; do
+  mtime=$(stat -f '%m' "$f" 2>/dev/null || stat -c '%Y' "$f" 2>/dev/null || echo 0)
+  if [[ -z "$out" ]] || (( mtime < oldest_mtime )); then
+    out="$f"
+    oldest_mtime=$mtime
+  fi
+done < <(find "$out_dir" -maxdepth 1 -type f -name "*_${sid12}.md" -print0 2>/dev/null)
+
+if [[ -z "$out" ]]; then
+  out="$out_dir/$(date +"%Y-%m-%d_%H-%M")_${sid12}.md"
 fi
 
-# 응답 1건을 한 번의 write 로 append (동시 Stop hook 간 인터리브 방지).
-# 페이로드 전체를 변수에 만든 뒤 단일 printf 호출로 append 하면
-# 짧은 경우엔 사실상 atomic 하다 (PIPE_BUF 이하).
-payload="$(printf '## %s\n\n%s\n\n---\n\n' "$ts" "$content")"
-printf '%s' "$payload" >> "$out"
+if [[ "$SCOPE" == "all" ]]; then
+  # 세션 전체 dump: 파일을 매번 새로 씀 (append 시 헤더·본문 중복 방지).
+  payload="$(printf '# Claude session %s\n\n_Full transcript dump @ %s_\n\n---\n\n%s\n\n---\n\n' \
+              "$session_id" "$ts" "$content")"
+  printf '%s' "$payload" > "$out"
+else
+  # 새 파일이면 H1 헤더로 시작
+  if [[ ! -e "$out" ]]; then
+    printf '# Claude session %s\n\n---\n\n' "$session_id" > "$out"
+  fi
+
+  # 응답 1건을 한 번의 write 로 append (동시 Stop hook 간 인터리브 방지).
+  # 페이로드 전체를 변수에 만든 뒤 단일 printf 호출로 append 하면
+  # 짧은 경우엔 사실상 atomic 하다 (PIPE_BUF 이하).
+  payload="$(printf '## %s\n\n%s\n\n---\n\n' "$ts" "$content")"
+  printf '%s' "$payload" >> "$out"
+fi
 
 if [[ "$SOURCE" == "slash" ]]; then
-  echo "Exported last response → $out"
+  if [[ "$SCOPE" == "all" ]]; then
+    echo "Exported full session → $out"
+  else
+    echo "Exported last response → $out"
+  fi
 fi
 
 exit 0
