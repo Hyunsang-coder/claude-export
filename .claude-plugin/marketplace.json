@@ -9,7 +9,9 @@
       "name": "claude-export",
       "description": "Append every Claude Code response to a per-session markdown file. Zero LLM calls.",
       "version": "0.1.0",
-      "source": "."
+      "source": "./plugins/claude-export",
+      "category": "productivity",
+      "homepage": "https://github.com/Hyunsang-coder/claude-export"
     }
   ]
 }
