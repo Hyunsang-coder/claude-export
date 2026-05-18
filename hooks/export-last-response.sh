@@ -112,23 +112,48 @@ fi
 # "진짜 user prompt" 는 content가 문자열이거나 tool_result가 아닌 user 라인.
 # 그 마지막 진짜 user prompt 이후의 모든 assistant.text 블록을 시간순으로 잇는다.
 #
-# 슬래시 컨텍스트에서는 transcript 끝에 "/export-response" user 라인이
-# 이미 추가된 상태이므로, 그 라인 자체는 건너뛰고 그 *직전* 실제 user prompt
-# 이후의 assistant.text 를 추출하기 위해 skip_last=1 을 넘긴다.
-# 단, user prompt 가 단 1개뿐인 세션이면 fallback 으로 그 1개부터 추출.
-skip_last=0
-[[ "$SOURCE" == "slash" ]] && skip_last=1
+# 슬래시 컨텍스트에서는 /export-response 호출이 transcript 에 보통 2개의
+# user 라인을 만든다:
+#   1) <command-name>/export-response</command-name> 메타데이터 라인
+#   2) commands/export-response.md 의 본문이 user 메시지로 prepend 된 라인
+# 두 라인 모두 is_real_user 를 통과하므로, 단순히 "마지막 1개 skip" 으로는
+# 부족하다. jq 에서 슬래시 트리거와 관련된 마지막 user 라인 *블록* 전체를
+# 찾아 그 *이전* user prompt 부터 추출한다.
+mode_arg="hook"
+[[ "$SOURCE" == "slash" ]] && mode_arg="slash"
 
-content=$(jq -rs --argjson skip_last "$skip_last" '
+content=$(jq -rs --arg mode "$mode_arg" '
   def is_real_user:
     .type=="user"
     and ((.message.content | type == "string")
          or (.message.content | type == "array"
              and any(.[]; .type != "tool_result")));
-  [range(0; length) as $i | select(.[$i] | is_real_user) | $i] as $user_idxs
-  | (if ($user_idxs | length) == 0 then null
-     elif $skip_last == 1 and ($user_idxs | length) >= 2 then $user_idxs[-2]
-     else $user_idxs[-1] end) as $start
+  # user 라인의 "표시용 텍스트" (string 이면 그대로, array 면 모든 text 블록 join)
+  def user_text:
+    .message.content
+    | if type == "string" then .
+      elif type == "array" then
+        (map(select(.type == "text") | .text) | join("\n"))
+      else "" end;
+  # 이 user 라인이 슬래시 트리거의 일부인지 판정.
+  # - <command-name>/...</command-name> 메타데이터, 또는
+  # - export-response.md 본문(특징적인 첫 줄: "Run the export hook once")
+  def is_slash_trigger_line:
+    is_real_user
+    and (user_text as $t
+         | ($t | test("<command-name>/"))
+           or ($t | test("Run the export hook once")));
+
+  . as $all
+  | [range(0; length) as $i | select($all[$i] | is_real_user) | $i] as $user_idxs
+  | (if $mode == "slash" then
+       # 슬래시 트리거가 아닌 user 라인 인덱스만 추림 → 그 마지막이 진짜 prompt.
+       ([$user_idxs[] | select(($all[.] | is_slash_trigger_line) | not)]) as $non_trigger
+       | if ($non_trigger | length) > 0 then $non_trigger[-1]
+         elif ($user_idxs | length) > 0 then $user_idxs[-1]
+         else null end
+     elif ($user_idxs | length) > 0 then $user_idxs[-1]
+     else null end) as $start
   | if $start == null then []
     else .[$start:]
          | map(select(.type=="assistant"))
