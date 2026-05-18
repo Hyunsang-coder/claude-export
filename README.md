@@ -7,7 +7,8 @@ One session = one markdown file, with each response as a timestamped `## YYYY-MM
 ## Install
 
 ```
-/plugin install github:Hyunsang-coder/claude-export
+/plugin marketplace add Hyunsang-coder/claude-export
+/plugin install claude-export@claude-export
 ```
 
 Then enable for the project you're in:

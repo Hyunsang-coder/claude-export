@@ -1,0 +1,15 @@
+{
+  "name": "claude-export",
+  "owner": {
+    "name": "Hyunsang Joo",
+    "email": "joo.hyunsang@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "claude-export",
+      "description": "Append every Claude Code response to a per-session markdown file. Zero LLM calls.",
+      "version": "0.1.0",
+      "source": "."
+    }
+  ]
+}
