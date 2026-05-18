@@ -1,7 +1,0 @@
-{
-  "name": "claude-export",
-  "version": "0.1.0",
-  "description": "Append every Claude Code response to a per-session markdown file. Zero LLM calls.",
-  "author": "Hyunsang Joo <joo.hyunsang@gmail.com>",
-  "license": "MIT"
-}
